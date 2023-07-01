@@ -33,3 +33,23 @@ class ServiceOverview(Serializer):
         self.avgduration = avgduration
         self.error_count = error_count
         self.timeframe = timeframe
+
+
+class ServiceDependencyGraph(Serializer):
+    def __init__(self, parent, child, p95, p99, count, error_count) -> None:
+        self.parent = parent
+        self.child = child
+        self.p95 = p95
+        self.p99 = p99
+        self.count = count
+        self.error_count = error_count
+        self.error_count = error_count
+
+
+class QueryKeys(Serializer):
+    def __init__(self, tagKey, tagType, dataType, isColumn, service="n/A") -> None:
+        self.tagKey = (tagKey,)
+        self.tagType = tagType
+        self.dataType = dataType
+        self.isColumn = isColumn
+        self.service = service
