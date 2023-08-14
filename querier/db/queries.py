@@ -1,6 +1,6 @@
 from db.clickhouseclient import ClickHouseBase
 from settings import settings
-from db.models import ServiceOverview, ServiceDependencyGraph, QueryKeys
+from db.models import ServiceOverview, ServiceDependencyGraph, QueryKeys, SlowQueries
 from typing import List
 
 database_name = settings.DATABASE_NAME
@@ -16,7 +16,7 @@ class ServiceCalls(ClickHouseBase):
         query = f"SELECT DISTINCT name, serviceName FROM {database_name}.{service_calls_table}"
         if service_filter:
             query = query + f" Where serviceName = '{service_filter}' "
-        print(query)
+        # print(query)
         rows = self.execute_query(query)
         services = dict()
         for url, servicename in rows:
@@ -59,12 +59,14 @@ class TraceTable(ClickHouseBase):
                 count(*) as numCalls,
                 name as name,
                 quantile(0.99)(durationNano) as p99,
-                avg(durationNano) as avgDuration
+                avg(durationNano) as avgDuration,
+                stddevPop(durationNano) AS std_dev
             FROM {database_name}.{trace_table}
-            WHERE serviceName = %(servicename)s AND name IN %(urls)s
-                AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s
-            GROUP BY name
+            WHERE name IN %(urls)s AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s
         """
+        if service_name:
+            query += "AND serviceName = %(servicename)s"
+        query += "GROUP BY name"
         params = {
             "servicename": service_name,
             "urls": urls,
@@ -75,13 +77,14 @@ class TraceTable(ClickHouseBase):
         error_count_per_url = self.get_error_count_per_url_in_service(params)
         rows = self.execute_query(query, params)
         results = []
-        for count, name, p99, avgduration in rows:
+        for count, name, p99, avgduration, std_dev in rows:
             results.append(
                 ServiceOverview(
                     name,
                     count,
                     p99,
                     avgduration,
+                    std_dev,
                     error_count_per_url.get(name, 0),
                 )
             )
@@ -117,8 +120,39 @@ class TraceTable(ClickHouseBase):
 
         return results
 
-
-a = "ddd"
+    def get_slow_queries_by_service(self, params):
+        # t2.group_avg + 3 * t2.group_stddev
+        query = f"""
+            WITH 
+            group_stats AS (
+                SELECT name,
+                serviceName, 
+                AVG(durationNano) AS group_avg, 
+                STDDEV_POP(durationNano) AS group_stddev
+                FROM zen_traces_test.traces
+                WHERE serviceName IN %(servicenames)s AND name IN %(urls)s
+                GROUP BY name, serviceName
+            ),
+            anomalies AS (
+                SELECT t2.name,
+                t2.serviceName,
+                t1.traceID,
+                t1.durationNano,
+                t2.group_avg as avg_duration,
+                t2.group_stddev as std_dev
+                FROM zen_traces_test.traces t1
+                INNER JOIN group_stats t2
+                ON t1.name = t2.name 
+                AND t1.serviceName = t2.serviceName
+                WHERE t1.durationNano > (1)
+            )
+            SELECT * from anomalies
+        """
+        results = {}
+        rows = self.execute_query(query, params)
+        for row in rows:
+            results.setdefault(row[1], []).append(SlowQueries(*row))
+        return results
 
 
 class DependencyGraph(ClickHouseBase):
@@ -166,3 +200,7 @@ class QueryKeysToFilter(ClickHouseBase):
 #             WHERE serviceName = %(servicename)s AND name IN %(urls)s
 #                 AND timestamp >= %(start_time)s AND timestamp <= %(end_time)s
 #         """
+
+
+service_query = ServiceCalls()
+trace_table = TraceTable()

@@ -26,11 +26,12 @@ def serialize(o):
 class ServiceOverview(Serializer):
     name: str
 
-    def __init__(self, name, calls, p99, avgduration, error_count=0, timeframe=None) -> None:
+    def __init__(self, name, calls, p99, avgduration, std_dev=None, error_count=0, timeframe=None) -> None:
         self.name = name
         self.calls = calls
         self.p99 = p99
         self.avgduration = avgduration
+        self.std_dev = std_dev
         self.error_count = error_count
         self.timeframe = timeframe
 
@@ -48,8 +49,18 @@ class ServiceDependencyGraph(Serializer):
 
 class QueryKeys(Serializer):
     def __init__(self, tagKey, tagType, dataType, isColumn, service="n/A") -> None:
-        self.tagKey = (tagKey,)
+        self.tagKey = tagKey
         self.tagType = tagType
         self.dataType = dataType
         self.isColumn = isColumn
         self.service = service
+
+
+class SlowQueries(Serializer):
+    def __init__(self, name, servicename, traceid, duration, avg, std_dev):
+        self.name = name
+        self.servicename = servicename
+        self.traceid = traceid
+        self.duration = duration
+        self.avg = avg
+        self.std_dev = std_dev
